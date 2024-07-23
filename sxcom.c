@@ -21,7 +21,7 @@ typedef struct {
 
 static Win *windows = NULL;
 static int window_count = 0;
-static Picture root_picture = None;
+static Picture overlay_picture = None;
 static int damage_event, damage_error;
 
 static void log_fatalf(const char *str, ...) {
@@ -47,6 +47,26 @@ static void log_warn_f(const char *str, ...) {
   printf("WARNING: ");
   vprintf(str, args);
   va_end(args);
+}
+
+static void init_overlay(Display *dpy, Window overlay) {
+  XRenderPictureAttributes pa;
+  pa.subwindow_mode = IncludeInferiors;
+  XRenderPictFormat *format =
+      XRenderFindVisualFormat(dpy, DefaultVisual(dpy, DefaultScreen(dpy)));
+  if (!format) {
+    log_fatalf("Failed to find visual format for root window\n");
+  }
+  overlay_picture =
+      XRenderCreatePicture(dpy, overlay, format, CPSubwindowMode, &pa);
+  if (overlay_picture == None) {
+    log_fatalf("Failed to create picture for root window\n");
+  }
+
+  XRenderColor clear = {0};
+  XRenderFillRectangle(dpy, PictOpSrc, overlay_picture, &clear, 0, 0,
+                       DisplayWidth(dpy, DefaultScreen(dpy)),
+                       DisplayHeight(dpy, DefaultScreen(dpy)));
 }
 
 static Win *find_win(Window id) {
@@ -125,32 +145,13 @@ static void composite_window(Display *dpy, Win *win) {
                win->id);
   }
 
-  XRenderComposite(dpy, PictOpOver, win->picture, None, root_picture, 0, 0, 0,
+  XRenderComposite(dpy, PictOpOver, win->picture, None, overlay_picture, 0, 0, 0,
                    0, win->attr.x, win->attr.y, win->attr.width,
                    win->attr.height);
   win->damaged = false;
 }
 
 static void composite_damaged_windows(Display *dpy, Window root) {
-  if (root_picture == None) {
-    XRenderPictureAttributes pa;
-    pa.subwindow_mode = IncludeInferiors;
-    XRenderPictFormat *format =
-        XRenderFindVisualFormat(dpy, DefaultVisual(dpy, DefaultScreen(dpy)));
-    if (!format) {
-      log_fatalf("Failed to find visual format for root window\n");
-    }
-    root_picture =
-        XRenderCreatePicture(dpy, root, format, CPSubwindowMode, &pa);
-    if (root_picture == None) {
-      log_fatalf("Failed to create picture for root window\n");
-    }
-  }
-
-  XRenderColor clear = {0};
-  XRenderFillRectangle(dpy, PictOpSrc, root_picture, &clear, 0, 0,
-                       DisplayWidth(dpy, DefaultScreen(dpy)),
-                       DisplayHeight(dpy, DefaultScreen(dpy)));
 
   for (int i = 0; i < window_count; i++) {
     composite_window(dpy, &windows[i]);
@@ -213,6 +214,7 @@ int main(int argc, char **argv) {
   }
   XFree(children);
 
+  init_overlay(dpy, root);
   composite_damaged_windows(dpy, root);
 
   XEvent ev;
@@ -245,8 +247,8 @@ int main(int argc, char **argv) {
     XDamageDestroy(dpy, windows[i].damage);
     XRenderFreePicture(dpy, windows[i].picture);
   }
-  if (root_picture != None) {
-    XRenderFreePicture(dpy, root_picture);
+  if (overlay_picture != None) {
+    XRenderFreePicture(dpy, overlay_picture);
   }
   free(windows);
   XCloseDisplay(dpy);
