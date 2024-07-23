@@ -1,4 +1,3 @@
-#include "./signals.h"
 #include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xcomposite.h>
@@ -172,7 +171,6 @@ void handle_damage(){}
 int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
   Display *dpy;
-  bool quit = false;
   Window root;
   Window root_return, parent_return;
   Window *children;
@@ -180,7 +178,6 @@ int main(int argc, char **argv) {
   int scr;
 
   dpy = XOpenDisplay(NULL);
-  handle_signals(&quit);
 
   if (!dpy) {
     log_fatalf("Failed to open X11 display\n");
@@ -219,7 +216,7 @@ int main(int argc, char **argv) {
   composite_damaged_windows(dpy, root);
 
   XEvent ev;
-  while (!quit) {
+  while (1) {
     XNextEvent(dpy, &ev);
     switch (ev.type) {
     case CreateNotify:
