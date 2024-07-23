@@ -151,7 +151,7 @@ static void composite_window(Display *dpy, Win *win) {
   win->damaged = false;
 }
 
-static void composite_damaged_windows(Display *dpy, Window root) {
+static void composite_damaged_windows(Display *dpy) {
 
   for (int i = 0; i < window_count; i++) {
     composite_window(dpy, &windows[i]);
@@ -173,6 +173,7 @@ int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
   Display *dpy;
   Window root;
+  Window overlay;
   Window root_return, parent_return;
   Window *children;
   unsigned int nchildren;
@@ -214,8 +215,9 @@ int main(int argc, char **argv) {
   }
   XFree(children);
 
-  init_overlay(dpy, root);
-  composite_damaged_windows(dpy, root);
+  overlay = XCompositeGetOverlayWindow(dpy, root);
+  init_overlay(dpy, overlay);
+  composite_damaged_windows(dpy);
 
   XEvent ev;
   while (1) {
