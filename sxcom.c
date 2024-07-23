@@ -1,4 +1,3 @@
-#include "./log.h"
 #include "./signals.h"
 #include <X11/X.h>
 #include <X11/Xlib.h>
@@ -6,6 +5,7 @@
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xrender.h>
 #include <locale.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +25,31 @@ static int window_count = 0;
 static Picture root_picture = None;
 static int damage_event, damage_error;
 
+static void log_fatalf(const char *str, ...) {
+  va_list args;
+  va_start(args, str);
+  printf("FATAL ERROR: ");
+  vprintf(str, args);
+  va_end(args);
+  exit(EXIT_FAILURE);
+}
+
+static void log_f(const char *str, ...) {
+  va_list args;
+  va_start(args, str);
+  printf("LOG: ");
+  vprintf(str, args);
+  va_end(args);
+}
+
+static void log_warn_f(const char *str, ...) {
+  va_list args;
+  va_start(args, str);
+  printf("WARNING: ");
+  vprintf(str, args);
+  va_end(args);
+}
+
 static Win *find_win(Window id) {
   for (int i = 0; i < window_count; i++) {
     if (windows[i].id == id) {
@@ -40,12 +65,12 @@ static void add_win(Display *dpy, Window id) {
 
   windows = realloc(windows, (window_count + 1) * sizeof(Win));
   if (!windows) {
-    log_fatal("Failed to allocate memory for new window");
+    log_fatalf("Failed to allocate memory for new window\n");
   }
   Win *new = &windows[window_count];
   new->id = id;
   if (!XGetWindowAttributes(dpy, id, &new->attr)) {
-    log_fatal("Failed to get window attributes");
+    log_fatalf("Failed to get window attributes\n");
   }
   new->damage = XDamageCreate(dpy, id, XDamageReportNonEmpty);
 
@@ -53,11 +78,11 @@ static void add_win(Display *dpy, Window id) {
   pa.subwindow_mode = IncludeInferiors;
   XRenderPictFormat *format = XRenderFindVisualFormat(dpy, new->attr.visual);
   if (!format) {
-    log_fatalf("Failed to find visual format for window 0x%lx", id);
+    log_fatalf("Failed to find visual format for window 0x%lx\n", id);
   }
   new->picture = XRenderCreatePicture(dpy, id, format, CPSubwindowMode, &pa);
   if (new->picture == None) {
-    log_fatalf("Failed to create picture for window 0x%lx", id);
+    log_fatalf("Failed to create picture for window 0x%lx\n", id);
   }
   new->damaged = true; // Consider new windows as damaged
 
@@ -67,7 +92,7 @@ static void add_win(Display *dpy, Window id) {
 static void damage_win(Display *dpy, XDamageNotifyEvent *de) {
   Win *win = find_win(de->drawable);
   if (!win) {
-    log_fatal("Received damage event for unknown window");
+    log_fatalf("Received damage event for unknown window\n");
   }
   win->damaged = true;
   
@@ -114,12 +139,12 @@ static void composite_damaged_windows(Display *dpy, Window root) {
     XRenderPictFormat *format =
         XRenderFindVisualFormat(dpy, DefaultVisual(dpy, DefaultScreen(dpy)));
     if (!format) {
-      log_fatal("Failed to find visual format for root window");
+      log_fatalf("Failed to find visual format for root window\n");
     }
     root_picture =
         XRenderCreatePicture(dpy, root, format, CPSubwindowMode, &pa);
     if (root_picture == None) {
-      log_fatal("Failed to create picture for root window");
+      log_fatalf("Failed to create picture for root window\n");
     }
   }
 
@@ -136,8 +161,8 @@ static void composite_damaged_windows(Display *dpy, Window root) {
 static int error_handler(Display *dpy, XErrorEvent *ev) {
   char error_text[256];
   XGetErrorText(dpy, ev->error_code, error_text, sizeof(error_text));
-  log_fatalf(
-      "X11 error: %s (request code: %d, error code: %d, resource id: %lu)",
+  log_warn_f(
+      "X11 error: %s (request code: %d, error code: %d, resource id: %lu)\n",
       error_text, ev->request_code, ev->error_code, ev->resourceid);
   return 0;
 }
@@ -158,9 +183,9 @@ int main(int argc, char **argv) {
   handle_signals(&quit);
 
   if (!dpy) {
-    log_fatal("Failed to open X11 display");
+    log_fatalf("Failed to open X11 display\n");
   } else {
-    log_normalf("Opened X11 display: %s", DisplayString(dpy));
+    log_f("Opened X11 display: %s\n", DisplayString(dpy));
   }
 
   scr = DefaultScreen(dpy);
@@ -170,10 +195,10 @@ int main(int argc, char **argv) {
 
   int event_base, error_base;
   if (!XCompositeQueryExtension(dpy, &event_base, &error_base)) {
-    log_fatal("X Composite extension not available");
+    log_fatalf("X Composite extension not available\n");
   }
   if (!XDamageQueryExtension(dpy, &damage_event, &damage_error)) {
-    log_fatal("X Damage extension not available");
+    log_fatalf("X Damage extension not available\n");
   }
 
   XCompositeRedirectSubwindows(dpy, root, CompositeRedirectManual);
