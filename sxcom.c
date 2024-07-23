@@ -52,19 +52,18 @@ static void log_warn_f(const char *str, ...) {
 static void init_overlay(Display *dpy, Window overlay) {
   XRenderPictureAttributes pa;
   pa.subwindow_mode = IncludeInferiors;
-  XRenderPictFormat *format =
-      XRenderFindVisualFormat(dpy, DefaultVisual(dpy, DefaultScreen(dpy)));
+  XRenderPictFormat *format = XRenderFindVisualFormat(dpy, DefaultVisual(dpy, DefaultScreen(dpy)));
   if (!format) {
     log_fatalf("Failed to find visual format for root window\n");
   }
-  overlay_picture =
-      XRenderCreatePicture(dpy, overlay, format, CPSubwindowMode, &pa);
+  overlay_picture = XRenderCreatePicture(dpy, overlay, format, CPSubwindowMode, &pa);
   if (overlay_picture == None) {
     log_fatalf("Failed to create picture for root window\n");
   }
 
   XRenderColor clear = {0};
-  XRenderFillRectangle(dpy, PictOpSrc, overlay_picture, &clear, 0, 0,
+  XRenderColor red = {0xffff, 0, 0, 0xffff};
+  XRenderFillRectangle(dpy, PictOpSrc, overlay_picture, &red, 0, 0,
                        DisplayWidth(dpy, DefaultScreen(dpy)),
                        DisplayHeight(dpy, DefaultScreen(dpy)));
 }
@@ -145,7 +144,13 @@ static void composite_window(Display *dpy, Win *win) {
                win->id);
   }
 
-  XRenderComposite(dpy, PictOpOver, win->picture, None, overlay_picture, 0, 0, 0,
+  XRenderPictureAttributes pa;
+  pa.subwindow_mode = IncludeInferiors;
+  XRenderPictFormat *format = XRenderFindVisualFormat(dpy, win->attr.visual);
+
+  Picture picture = XRenderCreatePicture(dpy, win->id, format, CPSubwindowMode, &pa);
+
+  XRenderComposite(dpy, PictOpOver, picture, None, overlay_picture, 0, 0, 0,
                    0, win->attr.x, win->attr.y, win->attr.width,
                    win->attr.height);
   win->damaged = false;
@@ -243,6 +248,8 @@ int main(int argc, char **argv) {
       }
       break;
     }
+    printf("comp\n");
+    composite_damaged_windows(dpy);
   }
 
   for (int i = 0; i < window_count; i++) {
