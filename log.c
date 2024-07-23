@@ -7,6 +7,15 @@ void log_fatal(char* str) {
   exit(1);
 }
 
+void log_fatalf(char* str, ...) {
+  va_list args;
+  va_start(args, str);
+  printf("FATAL ERROR: ");
+  vprintf(str, args);
+  printf("\n");
+  va_end(args);
+}
+
 void log_normal(char* str) {
   printf("LOG: %s\n", str);
 }

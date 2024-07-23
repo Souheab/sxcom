@@ -5,7 +5,7 @@
 bool *global_quit;
 
 void handle_sigint() {
-  printf("Caught SIGINT\n");
+  printf("SIGINT received\n");
   *global_quit = true;
 }
 
