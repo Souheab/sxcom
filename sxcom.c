@@ -15,7 +15,6 @@ typedef struct {
   Window id;
   XWindowAttributes attr;
   Damage damage;
-  Picture picture;
   bool damaged;
 } Win;
 
@@ -98,10 +97,6 @@ static void add_win(Display *dpy, Window id) {
   if (!format) {
     log_fatalf("Failed to find visual format for window 0x%lx\n", id);
   }
-  new->picture = XRenderCreatePicture(dpy, id, format, CPSubwindowMode, &pa);
-  if (new->picture == None) {
-    log_fatalf("Failed to create picture for window 0x%lx\n", id);
-  }
   new->damaged = true; // Consider new windows as damaged
 
   window_count++;
@@ -123,9 +118,6 @@ static void remove_win(Display *dpy, Window id) {
         XDamageDestroy(dpy, windows[i].damage);
       }
 
-      if (windows[i].picture != None) {
-        XRenderFreePicture(dpy, windows[i].picture);
-      }
       memmove(&windows[i], &windows[i + 1],
               (window_count - i - 1) * sizeof(Win));
       window_count--;
@@ -137,11 +129,6 @@ static void remove_win(Display *dpy, Window id) {
 static void composite_window(Display *dpy, Win *win) {
   if (!win->damaged || win->attr.map_state != IsViewable) {
     return;
-  }
-
-  if (win->picture == None) {
-    log_fatalf("Attempting to composite window 0x%lx with invalid picture",
-               win->id);
   }
 
   XRenderPictureAttributes pa;
@@ -254,7 +241,6 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < window_count; i++) {
     XDamageDestroy(dpy, windows[i].damage);
-    XRenderFreePicture(dpy, windows[i].picture);
   }
   if (overlay_picture != None) {
     XRenderFreePicture(dpy, overlay_picture);
