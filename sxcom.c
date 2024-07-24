@@ -27,11 +27,10 @@ typedef struct {
 
 static Win *windows = NULL;
 static int win_count = 0;
-static Picture overlay_picture = None;
+static Picture root_picture = None;
 static int damage_event, damage_error;
 static Display *dpy;
 static Window root;
-static Window overlay;
 
 static void log_fatalf(const char *str, ...) {
   va_list args;
@@ -58,21 +57,21 @@ static void log_warn_f(const char *str, ...) {
   va_end(args);
 }
 
-static void init_overlay() {
+static void init_root_picture() {
   XRenderPictureAttributes pa;
   pa.subwindow_mode = IncludeInferiors;
   XRenderPictFormat *format = XRenderFindVisualFormat(dpy, DefaultVisual(dpy, DefaultScreen(dpy)));
   if (!format) {
     log_fatalf("Failed to find visual format for root window\n");
   }
-  overlay_picture = XRenderCreatePicture(dpy, overlay, format, CPSubwindowMode, &pa);
-  if (overlay_picture == None) {
+  root_picture = XRenderCreatePicture(dpy, root, format, CPSubwindowMode, &pa);
+  if (root_picture == None) {
     log_fatalf("Failed to create picture for root window\n");
   }
 
   XRenderColor clear = {0, 0, 0, 0};
   XRenderColor red = {0xffff, 0, 0, 0xffff};
-  XRenderFillRectangle(dpy, PictOpSrc, overlay_picture, &clear, 0, 0,
+  XRenderFillRectangle(dpy, PictOpSrc, root_picture, &clear, 0, 0,
                        DisplayWidth(dpy, DefaultScreen(dpy)),
                        DisplayHeight(dpy, DefaultScreen(dpy)));
 }
@@ -178,7 +177,9 @@ static void remove_win(Window window) {
 }
 
 static void composite_window(Win *win) {
-  if (win->mapwin == NULL || !win->mapwin->redraw_needed || win->attr.map_state != IsViewable) {
+  if (win->mapwin == NULL ||
+      //!win->mapwin->redraw_needed ||
+      win->attr.map_state != IsViewable) {
     return;
   }
 
@@ -188,7 +189,7 @@ static void composite_window(Win *win) {
 
   Picture picture = XRenderCreatePicture(dpy, win->window, format, CPSubwindowMode, &pa);
 
-  XRenderComposite(dpy, PictOpOver, picture, None, overlay_picture, 0, 0, 0,
+  XRenderComposite(dpy, PictOpOver, picture, None, root_picture, 0, 0, 0,
                    0, win->attr.x, win->attr.y, win->attr.width,
                    win->attr.height);
   win->mapwin->redraw_needed = false;
@@ -260,8 +261,7 @@ int main(int argc, char **argv) {
   }
   XFree(children);
 
-  overlay = XCompositeGetOverlayWindow(dpy, root);
-  init_overlay();
+  init_root_picture();
   composite_damaged_windows();
 
   XEvent ev;
@@ -298,8 +298,8 @@ int main(int argc, char **argv) {
   for (int i = 0; i < win_count; i++) {
     XDamageDestroy(dpy, windows[i].mapwin->damage);
   }
-  if (overlay_picture != None) {
-    XRenderFreePicture(dpy, overlay_picture);
+  if (root_picture != None) {
+    XRenderFreePicture(dpy, root_picture);
   }
   free(windows);
   XCloseDisplay(dpy);
