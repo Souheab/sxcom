@@ -3,6 +3,7 @@
 #include <X11/extensions/Xcomposite.h>
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xrender.h>
+#include <X11/extensions/Xfixes.h>
 #include <locale.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -12,14 +13,20 @@
 #include <unistd.h>
 
 typedef struct {
-  Window id;
-  XWindowAttributes attr;
   Damage damage;
-  bool damaged;
+  XserverRegion damaged_region;
+  bool redraw_needed;
+  XRenderPictFormat *format;
+} MapWin;
+
+typedef struct {
+  Window window;
+  XWindowAttributes attr;
+  MapWin *mapwin;
 } Win;
 
 static Win *windows = NULL;
-static int window_count = 0;
+static int win_count = 0;
 static Picture overlay_picture = None;
 static int damage_event, damage_error;
 static Display *dpy;
@@ -70,39 +77,80 @@ static void init_overlay() {
                        DisplayHeight(dpy, DefaultScreen(dpy)));
 }
 
-static Win *find_win(Window id) {
-  for (int i = 0; i < window_count; i++) {
-    if (windows[i].id == id) {
+static Win *find_win(Window window) {
+  for (int i = 0; i < win_count; i++) {
+    if (windows[i].window == window) {
       return &windows[i];
     }
   }
   return NULL;
 }
 
-static void add_win(Window id) {
-  if (find_win(id))
+static MapWin *map_win(Window window, XWindowAttributes attr) {
+  if (attr.width <= 0 || attr.height <= 0) {
+    log_f("Window %lu has invalid size (%dx%d), skipping\n", window, attr.width,
+          attr.height);
+    return NULL;
+  }
+
+  XRenderPictFormat *format = XRenderFindVisualFormat(dpy, attr.visual);
+  if (format == NULL) {
+    log_warn_f("Failed to find visual format for window %lu, skipping\n", window);
+    return NULL;
+  }
+
+  Damage damage = XDamageCreate(dpy, window, XDamageReportNonEmpty);
+  if (damage == None) {
+    log_warn_f("Failed to create damage object for window %lu, skipping\n", window);
+    return NULL;
+  }
+
+  MapWin *new = calloc(1, sizeof(MapWin));
+
+  new->damage = damage;
+  new->damaged_region = XFixesCreateRegion(dpy, NULL, 0);
+  new->format = format;
+  new->redraw_needed = true;
+
+  return new;
+}
+
+static void add_win(Window window) {
+
+  log_f("Considering window %lu for addition\n", window);
+
+  if (find_win(window) != NULL) {
+    log_f("Window %lu already added, skipping\n", window);
     return;
-
-  windows = realloc(windows, (window_count + 1) * sizeof(Win));
-  if (!windows) {
-    log_fatalf("Failed to allocate memory for new window\n");
   }
-  Win *new = &windows[window_count];
-  new->id = id;
-  if (!XGetWindowAttributes(dpy, id, &new->attr)) {
-    log_fatalf("Failed to get window attributes\n");
-  }
-  new->damage = XDamageCreate(dpy, id, XDamageReportNonEmpty);
 
-  XRenderPictureAttributes pa;
-  pa.subwindow_mode = IncludeInferiors;
-  XRenderPictFormat *format = XRenderFindVisualFormat(dpy, new->attr.visual);
-  if (!format) {
-    log_fatalf("Failed to find visual format for window 0x%lx\n", id);
+  XWindowAttributes attr;
+  if (!XGetWindowAttributes(dpy, window, &attr)) {
+    log_warn_f("Failed to get window attributes for window %lu, skipping\n",
+               window);
+    return;
   }
-  new->damaged = true; // Consider new windows as damaged
 
-  window_count++;
+
+  MapWin *mapwin = NULL;
+  if (attr.map_state == IsViewable) {
+    mapwin = map_win(window, attr);
+  }
+
+  Win *new = realloc(windows, sizeof(Win) * (win_count + 1));
+  if (new == NULL) {
+    log_fatalf("Failed to allocate memory for new Win");
+  }
+  windows = new;
+
+  windows[win_count].window = window;
+  windows[win_count].attr = attr;
+  windows[win_count].mapwin = mapwin;
+
+  log_f("Added window %lu (x: %d, y: %d, width: %d, height: %d, depth: %d)\n",
+        window, attr.x, attr.y, attr.width, attr.height, attr.depth);
+
+  win_count++;
 }
 
 static void damage_win(XDamageNotifyEvent *de) {
@@ -110,27 +158,27 @@ static void damage_win(XDamageNotifyEvent *de) {
   if (!win) {
     log_fatalf("Received damage event for unknown window\n");
   }
-  win->damaged = true;
+  win->mapwin->redraw_needed = true;
   
 }
 
-static void remove_win(Window id) {
-  for (int i = 0; i < window_count; i++) {
-    if (windows[i].id == id) {
-      if (windows[i].damaged) {
-        XDamageDestroy(dpy, windows[i].damage);
+static void remove_win(Window window) {
+  for (int i = 0; i < win_count; i++) {
+    if (windows[i].window == window) {
+      if (windows[i].mapwin->redraw_needed) {
+        XDamageDestroy(dpy, windows[i].mapwin->redraw_needed);
       }
 
       memmove(&windows[i], &windows[i + 1],
-              (window_count - i - 1) * sizeof(Win));
-      window_count--;
+              (win_count - i - 1) * sizeof(Win));
+      win_count--;
       return;
     }
   }
 }
 
 static void composite_window(Win *win) {
-  if (!win->damaged || win->attr.map_state != IsViewable) {
+  if (win->mapwin == NULL || !win->mapwin->redraw_needed || win->attr.map_state != IsViewable) {
     return;
   }
 
@@ -138,17 +186,17 @@ static void composite_window(Win *win) {
   pa.subwindow_mode = IncludeInferiors;
   XRenderPictFormat *format = XRenderFindVisualFormat(dpy, win->attr.visual);
 
-  Picture picture = XRenderCreatePicture(dpy, win->id, format, CPSubwindowMode, &pa);
+  Picture picture = XRenderCreatePicture(dpy, win->window, format, CPSubwindowMode, &pa);
 
   XRenderComposite(dpy, PictOpOver, picture, None, overlay_picture, 0, 0, 0,
                    0, win->attr.x, win->attr.y, win->attr.width,
                    win->attr.height);
-  win->damaged = false;
+  win->mapwin->redraw_needed = false;
 }
 
 static void composite_damaged_windows() {
 
-  for (int i = 0; i < window_count; i++) {
+  for (int i = 0; i < win_count; i++) {
     composite_window(&windows[i]);
   }
 }
@@ -185,11 +233,16 @@ int main(int argc, char **argv) {
   XSynchronize(dpy, True);
 
   int event_base, error_base;
+  int damage_event, damage_error;
+  int xfixes_event, xfixes_error;
   if (!XCompositeQueryExtension(dpy, &event_base, &error_base)) {
     log_fatalf("X Composite extension not available\n");
   }
   if (!XDamageQueryExtension(dpy, &damage_event, &damage_error)) {
     log_fatalf("X Damage extension not available\n");
+  }
+  if (!XFixesQueryExtension(dpy, &xfixes_event, &xfixes_error)) {
+    log_fatalf("X Fixes extension not available\n");
   }
 
   XCompositeRedirectSubwindows(dpy, root, CompositeRedirectManual);
@@ -239,8 +292,8 @@ int main(int argc, char **argv) {
     composite_damaged_windows();
   }
 
-  for (int i = 0; i < window_count; i++) {
-    XDamageDestroy(dpy, windows[i].damage);
+  for (int i = 0; i < win_count; i++) {
+    XDamageDestroy(dpy, windows[i].mapwin->damage);
   }
   if (overlay_picture != None) {
     XRenderFreePicture(dpy, overlay_picture);

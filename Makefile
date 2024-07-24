@@ -1,9 +1,13 @@
 CC=gcc
+CFLAGS=-I/usr/include/freetype2 -o sxcom sxcom.c -lX11 -lXcomposite -lXdamage -lXrender -lXfixes -lXext -Wall -Wextra
 
 all: sxcom
 
 sxcom: sxcom.c
-	$(CC) -I/usr/include/freetype2 -o sxcom sxcom.c -lX11 -lXcomposite -lXdamage -lXrender -lXext -Wall -Wextra
+	$(CC) $(CFLAGS)
+
+debug: CFLAGS += -DDEBUG -g
+debug: sxcom
 
 clean:
 	rm -f sxcom
