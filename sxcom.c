@@ -22,6 +22,9 @@ static Win *windows = NULL;
 static int window_count = 0;
 static Picture overlay_picture = None;
 static int damage_event, damage_error;
+static Display *dpy;
+static Window root;
+static Window overlay;
 
 static void log_fatalf(const char *str, ...) {
   va_list args;
@@ -48,7 +51,7 @@ static void log_warn_f(const char *str, ...) {
   va_end(args);
 }
 
-static void init_overlay(Display *dpy, Window overlay) {
+static void init_overlay() {
   XRenderPictureAttributes pa;
   pa.subwindow_mode = IncludeInferiors;
   XRenderPictFormat *format = XRenderFindVisualFormat(dpy, DefaultVisual(dpy, DefaultScreen(dpy)));
@@ -76,7 +79,7 @@ static Win *find_win(Window id) {
   return NULL;
 }
 
-static void add_win(Display *dpy, Window id) {
+static void add_win(Window id) {
   if (find_win(id))
     return;
 
@@ -102,7 +105,7 @@ static void add_win(Display *dpy, Window id) {
   window_count++;
 }
 
-static void damage_win(Display *dpy, XDamageNotifyEvent *de) {
+static void damage_win(XDamageNotifyEvent *de) {
   Win *win = find_win(de->drawable);
   if (!win) {
     log_fatalf("Received damage event for unknown window\n");
@@ -111,7 +114,7 @@ static void damage_win(Display *dpy, XDamageNotifyEvent *de) {
   
 }
 
-static void remove_win(Display *dpy, Window id) {
+static void remove_win(Window id) {
   for (int i = 0; i < window_count; i++) {
     if (windows[i].id == id) {
       if (windows[i].damaged) {
@@ -126,7 +129,7 @@ static void remove_win(Display *dpy, Window id) {
   }
 }
 
-static void composite_window(Display *dpy, Win *win) {
+static void composite_window(Win *win) {
   if (!win->damaged || win->attr.map_state != IsViewable) {
     return;
   }
@@ -143,10 +146,10 @@ static void composite_window(Display *dpy, Win *win) {
   win->damaged = false;
 }
 
-static void composite_damaged_windows(Display *dpy) {
+static void composite_damaged_windows() {
 
   for (int i = 0; i < window_count; i++) {
-    composite_window(dpy, &windows[i]);
+    composite_window(&windows[i]);
   }
 }
 
@@ -163,9 +166,6 @@ void handle_damage(){}
 
 int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
-  Display *dpy;
-  Window root;
-  Window overlay;
   Window root_return, parent_return;
   Window *children;
   unsigned int nchildren;
@@ -203,23 +203,23 @@ int main(int argc, char **argv) {
 
   XQueryTree(dpy, root, &root_return, &parent_return, &children, &nchildren);
   for (unsigned int i = 0; i < nchildren; i++) {
-    add_win(dpy, children[i]);
+    add_win(children[i]);
   }
   XFree(children);
 
   overlay = XCompositeGetOverlayWindow(dpy, root);
-  init_overlay(dpy, overlay);
-  composite_damaged_windows(dpy);
+  init_overlay();
+  composite_damaged_windows();
 
   XEvent ev;
   while (1) {
     XNextEvent(dpy, &ev);
     switch (ev.type) {
     case CreateNotify:
-      add_win(dpy, ev.xcreatewindow.window);
+      add_win(ev.xcreatewindow.window);
       break;
     case DestroyNotify:
-      remove_win(dpy, ev.xdestroywindow.window);
+      remove_win(ev.xdestroywindow.window);
       break;
     case ConfigureNotify: 
       break;
@@ -236,7 +236,7 @@ int main(int argc, char **argv) {
       break;
     }
     printf("comp\n");
-    composite_damaged_windows(dpy);
+    composite_damaged_windows();
   }
 
   for (int i = 0; i < window_count; i++) {
