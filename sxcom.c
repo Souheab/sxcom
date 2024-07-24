@@ -70,9 +70,9 @@ static void init_overlay() {
     log_fatalf("Failed to create picture for root window\n");
   }
 
-  XRenderColor clear = {0};
+  XRenderColor clear = {0, 0, 0, 0};
   XRenderColor red = {0xffff, 0, 0, 0xffff};
-  XRenderFillRectangle(dpy, PictOpSrc, overlay_picture, &red, 0, 0,
+  XRenderFillRectangle(dpy, PictOpSrc, overlay_picture, &clear, 0, 0,
                        DisplayWidth(dpy, DefaultScreen(dpy)),
                        DisplayHeight(dpy, DefaultScreen(dpy)));
 }
@@ -265,28 +265,31 @@ int main(int argc, char **argv) {
   composite_damaged_windows();
 
   XEvent ev;
+  bool compositing_done = false;
   while (1) {
-    XNextEvent(dpy, &ev);
-    switch (ev.type) {
-    case CreateNotify:
-      add_win(ev.xcreatewindow.window);
-      break;
-    case DestroyNotify:
-      remove_win(ev.xdestroywindow.window);
-      break;
-    case ConfigureNotify: 
-      break;
-    case MapNotify:
-      break;
-    case UnmapNotify:
-      break;
-    case Expose:
-    default:
-      if (ev.type == damage_event + XDamageNotify) {
-        printf("Damage event\n");
-        XDamageNotifyEvent *dev = (XDamageNotifyEvent *)&ev;
+    while (XPending(dpy)) {
+      XNextEvent(dpy, &ev);
+      switch (ev.type) {
+      case CreateNotify:
+        add_win(ev.xcreatewindow.window);
+        break;
+      case DestroyNotify:
+        remove_win(ev.xdestroywindow.window);
+        break;
+      case ConfigureNotify: 
+        break;
+      case MapNotify:
+        break;
+      case UnmapNotify:
+        break;
+      case Expose:
+        default:
+          if (ev.type == damage_event + XDamageNotify) {
+            printf("Damage event\n");
+            XDamageNotifyEvent *dev = (XDamageNotifyEvent *)&ev;
+          }
+          break;
       }
-      break;
     }
     printf("comp\n");
     composite_damaged_windows();
